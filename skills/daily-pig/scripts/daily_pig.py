@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Daily Pig (今日小猪) — Hermes CLI port of huannai_plugin_rollpig.
+"""Daily Pig (今日小猪) — agent-agnostic CLI port of huannai_plugin_rollpig.
 
 Commands:
   today   [--user ID] [--local] [--no-download]
@@ -37,12 +37,20 @@ PIGHUB_API = "https://pighub.top/api/all-images"
 PIGHUB_DATA = "https://pighub.top/images/"
 
 
-def hermes_home() -> Path:
-    return Path(os.environ.get("HERMES_HOME", Path.home() / ".hermes")).expanduser()
-
-
 def state_dir() -> Path:
-    d = hermes_home() / "daily-pig"
+    """Runtime cache dir (sticky today draws + hub downloads).
+
+    Priority:
+      1) DAILY_PIG_HOME
+      2) ~/.daily-pig  (agent-agnostic default)
+      3) legacy $HERMES_HOME/daily-pig if it already exists (smooth migration)
+    """
+    if os.environ.get("DAILY_PIG_HOME"):
+        d = Path(os.environ["DAILY_PIG_HOME"]).expanduser()
+    else:
+        default = Path.home() / ".daily-pig"
+        legacy = Path(os.environ.get("HERMES_HOME", Path.home() / ".hermes")).expanduser() / "daily-pig"
+        d = legacy if (not default.exists() and legacy.exists()) else default
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -191,7 +199,12 @@ def ensure_hub_images(auto_refresh: bool = True) -> list[dict[str, Any]]:
 
 def cmd_today(args: argparse.Namespace) -> int:
     today_str = date.today().isoformat()
-    user_id = str(args.user or os.environ.get("HERMES_USER_ID") or "local")
+    user_id = str(
+        args.user
+        or os.environ.get("DAILY_PIG_USER")
+        or os.environ.get("HERMES_USER_ID")  # optional legacy
+        or "local"
+    )
     use_local = bool(getattr(args, "local", False))
     source = "local" if use_local else "hub"
 
@@ -401,11 +414,11 @@ def cmd_refresh(_: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="今日小猪 / Daily Pig for Hermes")
+    p = argparse.ArgumentParser(description="今日小猪 / Daily Pig (agent-agnostic CLI)")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     t = sub.add_parser("today", help="抽取今日小猪（默认 PigHub，每人每天固定）")
-    t.add_argument("--user", default=None, help="用户 ID（默认 local / HERMES_USER_ID）")
+    t.add_argument("--user", default=None, help="用户 ID（默认 local / DAILY_PIG_USER）")
     t.add_argument(
         "--local",
         action="store_true",
